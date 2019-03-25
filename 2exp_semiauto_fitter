@@ -1,0 +1,242 @@
+
+
+library(readr) 
+
+
+initial_index<- 100
+
+
+#import data
+
+file_address<- "C:/Users/PC_M/OneDrive - IBEC/STM_data/20170601/"
+save_route<- "C:/Users/PC_M/OneDrive - IBEC/20170601/repeated/100_400/beta_dif_2/"
+
+
+name_list = c("ut100us400_psi_samCOOH__0")
+number_of_curves_list = c(325)
+
+name_append<- "_Current.iz.cur"
+
+
+
+######Parameters
+R2_tol_criteria<- 0.5
+i2fit <- 0.001
+human_supervision<- TRUE
+save_treated_iz<- FALSE
+
+set_point<- 0.5
+set_point_error_tol<- 0.1
+beta_up <- 2
+beta_down <-0
+pz_start<-25   #skip first  points for fit
+beta_dff_regime_tol<- 2
+##########
+
+
+#OUTPUT###
+header_results= c("Index","beta (1/nm)",	"Error beta",	"R^2",	"Base line (nA)",	"Current at first point (nA)",	"Beta fit exp (1/nm)",	"Error beta_exp","R^2 fit exp",	"Beta short distance regime(1/nm)",	"Error beta farady",	"R^2 short distance regime lin fit",	"intersect_p #z point of regime change", "Exp fit all points", "Error exp fit all points","R^2 exp fit all points","Is curve ok?")
+##########
+
+for (j in 1:length(name_list)) {
+  name<- name_list[j]
+  number_of_curves<- number_of_curves_list[j]
+  results<- matrix(0,number_of_curves,17)
+  for (i in 1:number_of_curves) {
+    
+    #open file
+    index<-initial_index-1+i
+    file<-paste(file_address,name,as.character(index),name_append,sep="")
+    data <- read_delim(file," ",escape_double = FALSE, col_names = FALSE, trim_ws = TRUE, skip = 1)
+    skip<- which(data[2]=="end]")
+    iz_data<- data[-c(1:skip), ]
+    
+    #put I and z in vector form
+    z<-as.numeric(sort(as.vector(unlist(iz_data[1]))))
+    i_retract<- as.numeric(as.vector(unlist(iz_data[2])))
+    
+    #find base line
+    base_line<- mean(i_retract[300:500])
+    
+    #subtract base line and change the sign of current
+    i_r<- (i_retract-base_line)*sign(i_retract[1])
+    log_i_r<- log(i_r)
+    
+    #Preliminar linear fit
+    
+    #skip curves with current first setp out of range
+    if(abs(i_retract[1]) < set_point+ set_point_error_tol 
+       && abs(i_retract[1]) > set_point- set_point_error_tol) {
+      
+      
+      try (points2fit<- which(i_r < i2fit)[1])
+      try(lin_fit_1<- lm(log_i_r[1:pz_start] ~ z[1:pz_start]),TRUE)
+      try(lin_fit_2<- lm(log_i_r[pz_start:points2fit] ~ z[pz_start:points2fit]),TRUE)
+      
+      intersect_z<- (lin_fit_2$coefficients[1]-lin_fit_1$coefficients[1])/(lin_fit_1$coefficients[2]-lin_fit_2$coefficients[2])
+      
+      try (intersect_p<- which(z > intersect_z)[1])
+      
+      #      plot(z[1: 200],log_i_r[1:200],main=paste("curve index:",as.character(index)))
+      #      points(z[1:intersect_p],log_i_r[1:intersect_p],col = "red")
+      #      points(z[intersect_p: points2fit],log_i_r[intersect_p:points2fit],col = "blue")
+      #      abline(lin_fit_1, col= "red")
+      #      abline(lin_fit_2, col= "blue")
+      
+      if (intersect_z > 0 | abs(abs(lin_fit_1$coefficients[2])-abs(lin_fit_2$coefficients[2])) > beta_dff_regime_tol ) {
+        
+        try(lin_fit<- lm(log_i_r[intersect_p:points2fit] ~ z[intersect_p:points2fit]),TRUE)
+        try(lin_fit_f<- lm(log_i_r[1:intersect_p] ~ z[1:intersect_p]),TRUE)
+        lin_fit_value<- summary(lin_fit)
+        lin_fit_value_f<- summary(lin_fit_f)
+        
+        beta_f<- -lin_fit_value_f$coefficients[2,1] #beta
+        ebeta_f<- lin_fit_value_f$coefficients[2,2] # std error beta
+        r2_beta_f<- lin_fit_value_f$r.squared # R^2
+        
+        
+        #exp_fit
+        y<- i_r[intersect_p:points2fit]
+        x<- z[intersect_p: points2fit]
+        ds_doub <- data.frame(x = z[1:points2fit], y = i_r[1:points2fit])
+        ds<-  data.frame(x = x, y = y)
+        s <- seq(0, 1.5, length = 100)
+        exp_function <- function(x, A, B) {A*exp(x*B) }
+        try(exp_model<- nls(y ~ exp_function(x, constant, beta), data = ds, start = list(constant = 1, beta = 2)))
+        try(doub_exp_model<- nls(y ~ exp_function(x, constant, beta), data = ds_doub, start = list(constant = 1, beta = 5)))
+        
+        efit_param<- summary (exp_model)
+        beta_exp<- abs(efit_param$coefficients[2])
+        ebeta_exp<- efit_param$coefficients[2,2]
+        
+        TSS<- sum(ds[2]^2)-(sum(ds[2])^2)/length(efit_param$residuals)
+        r2_exp<- 1-(sum(efit_param$residuals^2)/TSS)*(efit_param$df[2]/(length(efit_param$residuals)-1))
+        
+        
+        efit_doub_param<- summary (doub_exp_model)
+        beta_exp_doub<- abs(efit_doub_param$coefficients[2])
+        ebeta_exp_doub<- efit_doub_param$coefficients[2,2]
+        
+        TSS_doub<- sum(ds_doub[2]^2)-(sum(ds_doub[2])^2)/length(efit_doub_param$residuals)
+        r2_exp_doub<- 1-(sum(efit_doub_param$residuals^2)/TSS_doub)*(efit_doub_param$df[2]/(length(efit_doub_param$residuals)-1))
+        
+        
+      }
+      else {
+        intersect_p <-1
+        try(lin_fit<- lm(log_i_r[intersect_p:points2fit] ~ z[intersect_p:points2fit]),TRUE)
+        lin_fit_value<- summary(lin_fit)
+        lin_fit_f<- lin_fit
+        
+        beta_f<- 0 #beta short distance regime
+        ebeta_f<- 0 # std error beta short distance regime
+        r2_beta_f<- 1 # R^2 short distance regimelin fit
+        
+        #exp_fit
+        y<- i_r[1:points2fit]
+        x<- z[1: points2fit]
+        #ds_doub <- data.frame(x = z[1:points2fit], y = i_r[1:points2fit])
+        ds<-  data.frame(x = x, y = y)
+        s <- seq(0, 1.5, length = 100)
+        exp_function <- function(x, A, B) {A*exp(x*B) }
+        try(exp_model<- nls(y ~ exp_function(x, constant, beta), data = ds, start = list(constant = 1, beta = 2)))
+        efit_param<- summary (exp_model)
+        beta_exp<- abs(efit_param$coefficients[2])
+        ebeta_exp<- efit_param$coefficients[2,2]
+        TSS<- sum(ds[2]^2)-(sum(ds[2])^2)/length(efit_param$residuals)
+        r2_exp<- 1-(sum(efit_param$residuals^2)/TSS)*(efit_param$df[2]/(length(efit_param$residuals)-1))
+        
+        
+        #copy exp for all points (doub) 
+        beta_exp_doub<- abs(efit_param$coefficients[2])
+        ebeta_exp_doub<- efit_param$coefficients[2,2]
+        r2_exp_doub<- r2_exp
+      }
+      
+      if(human_supervision == FALSE ){
+        if (lin_fit_value$r.squared > R2_tol_criteria
+            #&& abs(lin_fit_value$coefficients[2,1]) < beta_up 
+            #&& abs(lin_fit_value$coefficients[2,1]) > beta_down
+            && r2_beta_f > R2_tol_criteria){
+          curve_is_ok<- 1
+          print("You shall Pass")
+        }
+        else {curve_is_ok <- 0}
+        results[i,1]<- index #curve index
+        results[i,2]<- -lin_fit_value$coefficients[2,1] #beta
+        results[i,3]<- lin_fit_value$coefficients[2,2] # std error beta
+        results[i,4]<- lin_fit_value$r.squared # R^2
+        results[i,5]<- base_line
+        results[i,6]<- i_retract[1] #current at first point
+        results[i,7]<- beta_exp # exponential fit 
+        results[i,8]<- ebeta_exp # error exponential fit
+        results[i,9]<- r2_exp # r^2 of exp fit
+        results[i,10]<- beta_f #beta faraday
+        results[i,11]<- ebeta_f # std error beta farady
+        results[i,12]<- r2_beta_f # R^2 short distance regimelin fit
+        results[i,13]<- intersect_z #z point of regime change 
+        results[i,14]<- beta_exp_doub # exponential fit 
+        results[i,15]<- ebeta_exp_doub # error exponential fit
+        results[i,16]<- r2_exp_doub 
+        results[i,17]<- curve_is_ok
+        
+        if (save_treated_iz == TRUE ){
+          save_name<- "i_z_"
+          savefile<-paste(save_route,save_name,name,as.character(index),sep="")
+          write.table(log_i_r,savefile, sep="\t") 
+        }
+      }
+      else {
+        par(mfrow=c(1,2))
+        plot(z[1: 150],log_i_r[1:150],main=paste("R2",toString(lin_fit_value$r.squared,9)),ylab=paste("Beta",toString(lin_fit_value$coefficients[2,1]),cex=1.5))
+        points(z[intersect_p: points2fit],log_i_r[intersect_p:points2fit],col = "red")
+        abline(lin_fit_f, col= "blue")
+        abline(lin_fit, col= "red")
+        
+        
+        plot(z[1:150],i_r[1:150],type="lines",main=paste("curve index:",as.character(index)),ylab=paste("Start Current",toString(i_retract[1],10),cex=1.5))
+        lines(z[intersect_p:points2fit],i_r[intersect_p:points2fit],type="lines",col="red")
+        lines(s, predict(exp_model, list(x = s)), lty = 2, col = "green")
+        #lines(s, predict(doub_exp_model, list(x = s)), lty = 2, col = "blue")
+        lines(s, exp(s*lin_fit_value$coefficients[2,1]+lin_fit_value$coefficients[1,1]),lty = 3, col = "red")
+        
+        #Supervision input
+        evaluate<- c(lin_fit_value$coefficients[2,1],lin_fit_value$r.squared,beta_f,r2_beta_f)
+        print(evaluate)
+        y_n<-readline(prompt = "is the fit correct? (y/n) ")
+        
+        #save results
+        if (y_n == "y" ){
+          curve_is_ok<- 
+          results[i,1]<- index #curve index
+          results[i,2]<- -lin_fit_value$coefficients[2,1] #beta
+          results[i,3]<- lin_fit_value$coefficients[2,2] # std error beta
+          results[i,4]<- lin_fit_value$r.squared # R^2
+          results[i,5]<- base_line
+          results[i,6]<- i_retract[1] #current at first point
+          results[i,7]<- beta_exp # exponential fit 
+          results[i,8]<- ebeta_exp # error exponential fit
+          results[i,9]<- r2_exp # r^2 of exp fit
+          results[i,10]<- beta_f #beta faraday
+          results[i,11]<- ebeta_f # std error beta farady
+          results[i,12]<- r2_beta_f # R^2 short distance regimelin fit
+          results[i,13]<- intersect_z #z point of regime change 
+          results[i,14]<- beta_exp_doub # exponential fit 
+          results[i,15]<- ebeta_exp_doub # error exponential fit
+          results[i,16]<- r2_exp_doub 
+          results[i,17]<- curve_is_ok
+          
+          
+          if (save_treated_iz == TRUE ){
+            save_name<- "i_z_analyzed_"
+            savefile<-paste(save_route,save_name,name,as.character(index),sep="")
+            write.table(log_i_r,savefile, sep="\t") 
+          }
+        }
+      }
+    }
+  }
+  write.table(results,paste(save_route,"fit",name,"number",as.character(number_of_curves),"start_curve",as.character(initial_index),".txt",sep=""), sep="\t",col.names = header_results,row.names = FALSE)
+}
+
+
