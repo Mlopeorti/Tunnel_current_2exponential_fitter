@@ -8,12 +8,12 @@ initial_index<- 100
 
 #import data
 
-file_address<- "C:/Users/PC_M/OneDrive - IBEC/STM_data/20170601/"
-save_route<- "C:/Users/PC_M/OneDrive - IBEC/20170601/repeated/100_400/beta_dif_2/"
+file_address<- "C:/..."
+save_route<- "C:/..."
 
 
 name_list = c("ut100us400_psi_samCOOH__0")
-number_of_curves_list = c(325)
+number_of_curves_list = c(100)
 
 name_append<- "_Current.iz.cur"
 
