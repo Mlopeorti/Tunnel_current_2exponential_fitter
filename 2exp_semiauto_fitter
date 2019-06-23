@@ -1,12 +1,18 @@
+# Implemented to analyze Tunnel Current Spectroscopy data in publication:
 
+#doi.org/10.26434/chemrxiv.7945379.v1
+
+#Electrochemically Gated Long Distance Charge Transport in Photosystem I
+
+#Montserrat López Martínez, Manuel López Ortiz, Maria Elena Antinori, Emilie Wientjes, Roberta Croce,Ismael Díez-Pérez, Pau Gorostiza
+
+#Manuel López Ortiz -> Mlopeorti @ github
 
 library(readr) 
 
+#import data
 
 initial_index<- 100
-
-
-#import data
 
 file_address<- "C:/..."
 save_route<- "C:/..."
