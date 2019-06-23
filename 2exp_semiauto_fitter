@@ -8,6 +8,8 @@
 
 #Manuel López Ortiz -> Mlopeorti @ github
 
+# Institute for Bioengineering of Catalonia (IBEC), The Barcelona Institute of Science and Technology (BIST)
+############################################################################################################################################
 library(readr) 
 
 #import data
