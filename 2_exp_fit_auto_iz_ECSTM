@@ -1,0 +1,195 @@
+Manuel López Ortiz -> Mlopeorti @ github
+# Institute for Bioengineering of Catalonia (IBEC), The Barcelona Institute of Science and Technology (BIST)
+############################################################################################################################################
+library(readr)
+library(nls2)
+library(smooth)
+library(pracma)
+library(signal)
+
+#import data
+initial_index<- 1
+
+file_address<- "C:/Users/PC_M/OneDrive - IBEC/STM_data/20200116_d2/IZS/s0t400/"
+save_route<- "C:/Users/PC_M/OneDrive - IBEC/STM_data/20200116_d2/IZS/s0t400/"
+name_list<- c("iz_s0t400_sp03_tip1_r2_pIQA_PSI_PBS_0")#,"r1p0/r1_p000sn100_pIQA_PSI_PcCu_",)
+#number_of_curves_list = c(5)
+number_of_curves<- 1000
+name_append<- "_Current.iz.cur"
+save_name_full<- "iz_full"
+save_name_blink<- "iz_blink"
+points2plot<- 400
+######Parameters
+
+save_treated_iz<- TRUE
+plot_supervision<- TRUE
+
+
+set_point<- 0.3
+set_point_error_tol<- 0.1
+
+
+skip_curves<- c()
+##########
+#OUTPUT###
+header_results= c("Index","Chi^2",	"beta_1",	"beta_2",	"z crosspoint",	"current crossp",	"Io model",	"amp_model" ,"baseline_model","Current baseline", "Current at fisrt retreat point")
+##########
+for (j in 1:length(name_list)) {
+  name<- name_list[j]
+  #number_of_curves<- number_of_curves_list[j]
+  results<- matrix(0,number_of_curves,11)
+  for (i in 1:number_of_curves) {
+    #open file
+    
+    
+    chi2<- 0; b1<- 0; b2<- 0; zcross<- 0; icross<- 0; Io_model<- 0; resulamp_m<- 0; base_line_m<- 0; base_line<- 0; fpar<- 0
+    
+    index<-initial_index-1+i
+    if (index %in% skip_curves == FALSE){
+      print(index)
+      file<-paste(file_address,name,as.character(index),name_append,sep="")
+      data <- read_delim(file," ",escape_double = FALSE, col_names = FALSE, trim_ws = TRUE, skip = 1)
+      savefile_iz_full<-paste(save_route,as.character(index),save_name_full,as.character(index),name,sep="")
+      savefile_iz_blink<-paste(save_route,as.character(index),save_name_blink,name,sep="")
+      skip<- which(data[2]=="end]")
+      iz_data<- data[-c(1:skip), ]
+      #put I and z in vector form
+      zz<-sort(as.numeric(as.vector(unlist(iz_data[1]))))
+      i_retract<- as.numeric(as.vector(unlist(iz_data[2])))
+      #find base line
+      base_line<- mean(i_retract[800:1000])
+      #subtract base line and change the sign of current
+      index_2fit<- 1024#min(which(i_retract < 0.05 ))
+      i_r<- i_retract[1:index_2fit]
+      z<- zz[1:index_2fit]
+      
+      if(abs(i_retract[1]) < set_point+ set_point_error_tol
+         && abs(i_retract[1]) > set_point- set_point_error_tol) {
+        
+        
+        fit.sp<- smooth.spline(z,i_r, nknots=25)
+        y<- fit.sp$y
+        
+        chiM<- cbind(100000,100000,100000,100000)
+        #startM<- rbind(cbind(1,2,0.5),cbind(0.5,2,2),cbind(2,4,0.25))
+        startM<- rbind(cbind(4,2,0.2),cbind(3,4,0.5),cbind(6,8,0.1))
+        
+        st1<- list(P1=startM[1,1],P2=startM[1,2],P3=startM[1,3])
+        st2<- list(P1=startM[2,1],P2=startM[2,2],P3=startM[2,3]) 
+        st3<- list(P1=startM[3,1],P2=startM[3,2],P3=startM[3,3]) 
+        
+        mfit<- ""
+        mf1<- ""
+        mf2<- ""
+        mf3<- ""
+        try( mf1<- nls(y ~cbind(1,exp(-P1*z/(1+exp(1000*(z-P3))))*exp(-P2*z/(1+exp(-1000*(z-P3))))*exp(P3*(P1-P2)/(1+exp(1000*(z-P3))))), start =st1 ,algorithm = "plinear",control = 1E-6))
+        try( mf2<- nls(y ~cbind(1,exp(-P1*z/(1+exp(1000*(z-P3))))*exp(-P2*z/(1+exp(-1000*(z-P3))))*exp(P3*(P1-P2)/(1+exp(1000*(z-P3))))), start =st2 ,algorithm = "plinear",control = 1E-6))
+        try( mf3<- nls(y ~cbind(1,exp(-P1*z/(1+exp(1000*(z-P3))))*exp(-P2*z/(1+exp(-1000*(z-P3))))*exp(P3*(P1-P2)/(1+exp(1000*(z-P3))))), start =st3 ,algorithm = "plinear",control = 1E-6))
+        try( mfit_single<- nls(y ~cbind(1,exp(-P1*z)), start =list(P1=3) ,algorithm = "plinear",control = 1E-6))
+        
+        try(chiM[1]<- sum(((predict(mf1, list(x = z))-i_r)^2)/predict(mf1, list(x = z))))
+        try(chiM[2]<- sum(((predict(mf2, list(x = z))-i_r)^2)/predict(mf2, list(x = z))))
+        try(chiM[3]<- sum(((predict(mf3, list(x = z))-i_r)^2)/predict(mf3, list(x = z))))
+        try(chiM[4]<- sum(((predict(mfit_single, list(x = z))-i_r)^2)/predict(mfit_single, list(x = z))))
+        
+        #print(chiM)
+        #print(which.min(chiM))
+        
+        if (which.min(chiM) == 1){
+          mfit<- mf1
+        }
+        
+        if (which.min(chiM)== 2){
+          mfit<- mf2
+        }
+        
+        if (which.min(chiM)== 3){
+          mfit<- mf3
+        }
+        
+        if (which.min(chiM)== 4){
+          mfit<- mfit_single
+          fpar<- mfit$m$getAllPars()
+          b1<- 0
+          b2<-as.numeric(fpar[1])
+          zcross<- 0
+          icross<- 0
+          base_line_m<-as.numeric(fpar[2])
+          amp_m<- as.numeric(fpar[3])
+          
+          #print("single")
+        }
+        
+        if (which.min(chiM) < 4){
+          fpar<- mfit$m$getAllPars()
+          b1<- as.numeric(fpar[1])
+          b2<- as.numeric(fpar[2])
+          zcross<-as.numeric(fpar[3])
+          icross<- predict(mfit,  data.frame(z=zcross))
+          base_line_m<- as.numeric(fpar[4])
+          amp_m<- as.numeric(fpar[5])
+          Io_model<- predict(mfit,  data.frame(z=0))
+          #print("double")
+          #print(fpar)
+        }
+        
+        if (abs(icross-mean(i_retract[800:1000]))< 0.03 | abs(min(chiM)-chiM[4]) < 0.25 )  {
+          chi2<- 0; b1<- 0; b2<- 0; zcross<- 0; icross<- 0; Io_model<- 0; resulamp_m<- 0; base_line_m<- 0; base_line<- 0; fpar<- 0
+          mfit<- mfit_single
+          fpar<- mfit$m$getAllPars()
+          b1<- 0
+          b2<-as.numeric(fpar[1])
+          zcross<- 0
+          icross<- 0
+          base_line_m<-as.numeric(fpar[2])
+          amp_m<- as.numeric(fpar[3])
+          
+        }
+        
+        chi2<- sum(((predict(mfit, list(x = z))-i_r)^2)/predict(mfit, list(x = z)))
+        Io_model<- predict(mfit,  data.frame(z=0))
+        
+        if (plot_supervision== TRUE){
+          par(mfrow=c(1,2))  
+          plot(z[1:points2plot],log(i_r[1:points2plot]),xlab=append("chi^2: ",num2str(chi2)))
+          title(append("beta_1: ",num2str(b1)))
+          
+          if (chi2< 5){
+            lines(z,log(predict(mfit, list(x = z))), col = "green")
+          }
+          if ( (chi2> 5)){
+            lines(z,log(predict(mfit, list(x = z))), col = "red")
+            Sys.sleep(0.8)
+          }
+          
+          
+          lines(fit.sp, col = "blue")
+          plot(z[1:points2plot],i_r[1:points2plot],xlab="z [nm]",ylab=append("index :",num2str(index)))
+          lines(z,predict(mfit, list(x = z)), col = "green")
+          lines(fit.sp, col = "blue")            
+          
+          
+          title(append("beta_2: ",num2str(b2)))
+          
+        }
+        
+        
+        results[i,1]<- index #curve index
+        results[i,2]<- chi2
+        results[i,3]<- b1
+        results[i,4]<- b2
+        results[i,5]<- zcross
+        results[i,6]<- icross
+        results[i,7]<- Io_model
+        results[i,8]<- amp_m
+        results[i,9]<- base_line_m
+        results[i,10]<- mean(i_retract[800:1000]) # Basekine current
+        results[i,11]<- i_retract[1] #current at first point
+        
+      }
+    }
+  }
+  write.table(results,paste(save_route,"autofitter",name,"number",as.character(number_of_curves),"start_curve",as.character(initial_index),".txt",sep=""), sep="\t",col.names = header_results,row.names = FALSE)
+}
+
+#write.table(results,paste(save_route,"autofitter",name,"number",as.character(number_of_curves),"start_curve",as.character(initial_index),".txt",sep=""), sep="\t",col.names = header_results,row.names = FALSE)
